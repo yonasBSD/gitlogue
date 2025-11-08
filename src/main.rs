@@ -97,12 +97,60 @@ fn print_commit_info(metadata: &git::CommitMetadata) {
     println!();
     println!("  Files changed: {}", metadata.changes.len());
     for change in &metadata.changes {
-        println!("    {} {}", change.status.as_str(), change.path);
+        let mut display_path = format!("{} {}", change.status.as_str(), change.path);
+        if let Some(old_path) = &change.old_path {
+            display_path = format!("{} {} -> {}", change.status.as_str(), old_path, change.path);
+        }
+        if change.is_binary {
+            display_path.push_str(" (binary)");
+        }
+        println!("    {}", display_path);
     }
 
     if !metadata.changes.is_empty() {
         println!();
-        println!("  Diff:");
+        println!("  Structured changes:");
+        for change in &metadata.changes {
+            println!("    File: {}", change.path);
+            if change.is_binary {
+                println!("      (binary file)");
+                continue;
+            }
+
+            println!("      Hunks: {}", change.hunks.len());
+            for (i, hunk) in change.hunks.iter().enumerate() {
+                println!(
+                    "        Hunk #{}: @@ -{},{} +{},{} @@",
+                    i + 1,
+                    hunk.old_start,
+                    hunk.old_lines,
+                    hunk.new_start,
+                    hunk.new_lines
+                );
+
+                let additions = hunk
+                    .lines
+                    .iter()
+                    .filter(|l| matches!(l.change_type, git::LineChangeType::Addition))
+                    .count();
+                let deletions = hunk
+                    .lines
+                    .iter()
+                    .filter(|l| matches!(l.change_type, git::LineChangeType::Deletion))
+                    .count();
+
+                println!(
+                    "          Lines: {} total (+{} -{} context:{})",
+                    hunk.lines.len(),
+                    additions,
+                    deletions,
+                    hunk.lines.len() - additions - deletions
+                );
+            }
+        }
+
+        println!();
+        println!("  Raw diff:");
         for change in &metadata.changes {
             if !change.diff.is_empty() {
                 println!("{}", change.diff);
