@@ -2,6 +2,26 @@ use crate::git::{CommitMetadata, DiffHunk, FileChange, LineChangeType};
 use rand::Rng;
 use std::time::{Duration, Instant};
 
+// Duration multipliers relative to typing speed
+const CURSOR_MOVE_PAUSE: f64 = 0.5;       // Cursor movement between lines
+const CURSOR_MOVE_END_PAUSE: f64 = 10.0;  // After cursor movement completes
+const DELETE_LINE_PAUSE: f64 = 10.0;      // After deleting a line
+const INSERT_LINE_PAUSE: f64 = 6.7;       // After inserting a line
+const HUNK_PAUSE: f64 = 50.0;             // Between hunks
+const CHECKOUT_PAUSE: f64 = 16.7;         // After git checkout command
+const CHECKOUT_OUTPUT_PAUSE: f64 = 33.3;  // After git checkout output
+const OPEN_FILE_FIRST_PAUSE: f64 = 33.3;  // Before opening first file
+const OPEN_FILE_PAUSE: f64 = 50.0;        // Before opening subsequent files
+const OPEN_CMD_PAUSE: f64 = 16.7;         // After open command
+const FILE_SWITCH_PAUSE: f64 = 26.7;      // After switching file
+const GIT_ADD_PAUSE: f64 = 33.3;          // Before git add
+const GIT_ADD_CMD_PAUSE: f64 = 16.7;      // After git add command
+const GIT_COMMIT_PAUSE: f64 = 26.7;       // After git commit command
+const COMMIT_OUTPUT_PAUSE: f64 = 33.3;    // After commit output
+const GIT_PUSH_PAUSE: f64 = 16.7;         // After git push command
+const PUSH_OUTPUT_PAUSE: f64 = 10.0;      // Between push output lines
+const PUSH_FINAL_PAUSE: f64 = 66.7;       // After final push output
+
 /// Represents the current state of the editor buffer
 #[derive(Debug, Clone)]
 pub struct EditorBuffer {
@@ -178,22 +198,22 @@ impl AnimationEngine {
         // Git checkout to parent commit (simulation)
         let parent_hash = format!("{}^", &metadata.hash[..7]);
         self.add_terminal_command(&format!("git checkout {}", parent_hash));
-        self.steps.push(AnimationStep::Pause { duration_ms: 500 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CHECKOUT_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("HEAD is now at {} Previous commit", parent_hash),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 1000 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CHECKOUT_OUTPUT_PAUSE) as u64 });
 
         // Process all file changes
         for (index, change) in metadata.changes.iter().enumerate() {
             // Open file in editor
             if index == 0 {
-                self.steps.push(AnimationStep::Pause { duration_ms: 1000 });
+                self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * OPEN_FILE_FIRST_PAUSE) as u64 });
             } else {
-                self.steps.push(AnimationStep::Pause { duration_ms: 1500 });
+                self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * OPEN_FILE_PAUSE) as u64 });
             }
             self.add_terminal_command(&format!("open {}", change.path));
-            self.steps.push(AnimationStep::Pause { duration_ms: 500 });
+            self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * OPEN_CMD_PAUSE) as u64 });
 
             // Add file switch step
             let content = change.old_content.clone().unwrap_or_default();
@@ -203,21 +223,21 @@ impl AnimationEngine {
             });
 
             // Add pause before starting file animation
-            self.steps.push(AnimationStep::Pause { duration_ms: 800 });
+            self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * FILE_SWITCH_PAUSE) as u64 });
 
             // Generate animation steps for this file
             self.generate_steps_for_file(change);
 
             // Git add this file after editing
-            self.steps.push(AnimationStep::Pause { duration_ms: 1000 });
+            self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * GIT_ADD_PAUSE) as u64 });
             self.add_terminal_command(&format!("git add {}", change.path));
-            self.steps.push(AnimationStep::Pause { duration_ms: 500 });
+            self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64 });
         }
 
         // Git commit
         let commit_message = metadata.message.lines().next().unwrap_or("Update");
         self.add_terminal_command(&format!("git commit -m \"{}\"", commit_message));
-        self.steps.push(AnimationStep::Pause { duration_ms: 800 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * GIT_COMMIT_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("[main {}] {}", &metadata.hash[..7], commit_message),
         });
@@ -228,30 +248,30 @@ impl AnimationEngine {
                 if metadata.changes.len() == 1 { "" } else { "s" }
             ),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 1000 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * COMMIT_OUTPUT_PAUSE) as u64 });
 
         // Git push
         self.add_terminal_command("git push origin main");
-        self.steps.push(AnimationStep::Pause { duration_ms: 500 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * GIT_PUSH_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "Enumerating objects: 5, done.".to_string(),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 300 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * PUSH_OUTPUT_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "Counting objects: 100% (5/5), done.".to_string(),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 300 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * PUSH_OUTPUT_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "Writing objects: 100% (3/3), done.".to_string(),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 500 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * GIT_PUSH_PAUSE) as u64 });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("To https://github.com/user/repo.git"),
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("   {}..{} main -> main", &parent_hash[..7], &metadata.hash[..7]),
         });
-        self.steps.push(AnimationStep::Pause { duration_ms: 2000 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * PUSH_FINAL_PAUSE) as u64 });
 
         // Start with empty editor (no file opened yet)
         self.buffer = EditorBuffer::new();
@@ -289,7 +309,7 @@ impl AnimationEngine {
             line_offset += additions - deletions;
 
             // Add pause between hunks
-            self.steps.push(AnimationStep::Pause { duration_ms: 1500 });
+            self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * HUNK_PAUSE) as u64 });
         }
     }
 
@@ -303,17 +323,17 @@ impl AnimationEngine {
             // Move down
             for line in (from_line + 1)..=to_line {
                 self.steps.push(AnimationStep::MoveCursor { line, col: 0 });
-                self.steps.push(AnimationStep::Pause { duration_ms: 15 });
+                self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CURSOR_MOVE_PAUSE) as u64 });
             }
         } else {
             // Move up
             for line in (to_line..from_line).rev() {
                 self.steps.push(AnimationStep::MoveCursor { line, col: 0 });
-                self.steps.push(AnimationStep::Pause { duration_ms: 15 });
+                self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CURSOR_MOVE_PAUSE) as u64 });
             }
         }
 
-        self.steps.push(AnimationStep::Pause { duration_ms: 300 });
+        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CURSOR_MOVE_END_PAUSE) as u64 });
         to_line
     }
 
@@ -336,7 +356,7 @@ impl AnimationEngine {
                     self.steps.push(AnimationStep::DeleteLine {
                         line: buffer_line,
                     });
-                    self.steps.push(AnimationStep::Pause { duration_ms: 300 });
+                    self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * DELETE_LINE_PAUSE) as u64 });
                     cursor_line = buffer_line;
                     // After deletion, buffer_line stays the same
                     // (the next line moves up to this position)
@@ -361,7 +381,7 @@ impl AnimationEngine {
 
                     cursor_line = buffer_line;
                     buffer_line += 1; // Move to next line after insertion
-                    self.steps.push(AnimationStep::Pause { duration_ms: 200 });
+                    self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * INSERT_LINE_PAUSE) as u64 });
                 }
                 LineChangeType::Context => {
                     // Move cursor to next line if needed
@@ -370,7 +390,7 @@ impl AnimationEngine {
                             line: buffer_line,
                             col: 0,
                         });
-                        self.steps.push(AnimationStep::Pause { duration_ms: 15 });
+                        self.steps.push(AnimationStep::Pause { duration_ms: (self.speed_ms as f64 * CURSOR_MOVE_PAUSE) as u64 });
                     }
                     cursor_line = buffer_line;
                     buffer_line += 1; // Move to next line
