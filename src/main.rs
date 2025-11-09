@@ -1,6 +1,7 @@
 mod animation;
 mod git;
 mod panes;
+mod syntax;
 mod ui;
 
 use anyhow::{Context, Result};
@@ -45,10 +46,7 @@ pub struct Args {
 
 impl Args {
     pub fn validate(&self) -> Result<PathBuf> {
-        let repo_path = self
-            .path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("."));
+        let repo_path = self.path.clone().unwrap_or_else(|| PathBuf::from("."));
 
         if !repo_path.exists() {
             anyhow::bail!("Path does not exist: {}", repo_path.display());
@@ -83,7 +81,11 @@ fn main() -> Result<()> {
     };
 
     // Create UI with repository reference (for random mode) or without (for single commit mode)
-    let repo_ref = if is_commit_specified { None } else { Some(&repo) };
+    let repo_ref = if is_commit_specified {
+        None
+    } else {
+        Some(&repo)
+    };
     let mut ui = UI::new(args.speed, is_commit_specified, repo_ref);
     ui.load_commit(metadata);
     ui.run()?;
