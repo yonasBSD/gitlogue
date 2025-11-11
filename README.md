@@ -101,8 +101,6 @@ Rust, TypeScript, JavaScript, Python, Go, Ruby, Swift, Kotlin, Java, PHP, C#, C,
 
 Contributions are welcome! Please read our [Contributing Guidelines](docs/CONTRIBUTING.md) for details on how to get started.
 
-See the [v0.1.0 Milestone](https://github.com/unhappychoice/gitlogue/milestone/1) for planned features.
-
 ## License
 
 ISC License - see [LICENSE](LICENSE) file for details.
