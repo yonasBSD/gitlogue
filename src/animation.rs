@@ -11,6 +11,8 @@ const CURSOR_MOVE_SHORT_MULTIPLIER: f64 = 1.0; // Speed for short distances (1-5
 const CURSOR_MOVE_MEDIUM_MULTIPLIER: f64 = 0.3; // Speed for medium distances (51-200 lines)
 const CURSOR_MOVE_LONG_MULTIPLIER: f64 = 0.05; // Speed for long distances (201+ lines)
 const MAX_SCROLL_STEPS: usize = 60; // Maximum animation steps for any scroll distance
+const MIN_LOG_STEPS: usize = 50; // Minimum steps for logarithmic scaling (aligned with SHORT threshold)
+const LOG_SCALE_FACTOR: f64 = 8.0; // Scaling factor for logarithmic step calculation
 const DELETE_LINE_PAUSE: f64 = 10.0; // After deleting a line
 const INSERT_LINE_PAUSE: f64 = 6.7; // After inserting a line
 const HUNK_PAUSE: f64 = 50.0; // Between hunks
@@ -598,13 +600,14 @@ impl AnimationEngine {
 
         // Limit total animation steps for performance
         // For very long distances, use fewer steps with larger jumps
-        let num_steps = if distance <= 30 {
+        // Threshold aligned with SHORT distance category (50) to ensure monotonicity
+        let num_steps = if distance <= MIN_LOG_STEPS {
             distance // Show every line for short distances
         } else {
             // Scale steps logarithmically for longer distances
             // This ensures smooth animation while limiting total steps
-            let log_steps = (distance as f64).ln() * 8.0;
-            (log_steps as usize).clamp(20, MAX_SCROLL_STEPS)
+            let log_steps = (distance as f64).ln() * LOG_SCALE_FACTOR;
+            (log_steps as usize).clamp(MIN_LOG_STEPS, MAX_SCROLL_STEPS)
         };
 
         let mut positions = Vec::with_capacity(num_steps + 1);
