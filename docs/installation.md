@@ -60,7 +60,25 @@ cargo install gitlogue
 
 This will download, compile, and install the latest version.
 
-### Method 5: Download Pre-built Binaries
+### Method 5: Using Nix
+
+Run directly without installation:
+
+```bash
+nix run github:unhappychoice/gitlogue
+```
+
+Or add to your flake inputs:
+
+```nix
+{
+  inputs.gitlogue.url = "github:unhappychoice/gitlogue";
+}
+```
+
+Then use `inputs.gitlogue.packages.${system}.default` in your configuration.
+
+### Method 6: Download Pre-built Binaries
 
 Pre-built binaries for multiple platforms are available in the [Releases](https://github.com/unhappychoice/gitlogue/releases) section.
 
@@ -84,7 +102,7 @@ Pre-built binaries for multiple platforms are available in the [Releases](https:
    sudo mv gitlogue /usr/local/bin/
    ```
 
-### Method 6: From Source
+### Method 7: From Source
 
 If you want to build the latest development version or contribute to the project:
 
@@ -256,6 +274,39 @@ sudo cargo install gitlogue
 ```
 
 However, it's generally recommended to use cargo without sudo and ensure your user has proper permissions.
+
+### GLIBC Version Errors (Linux)
+
+If you see an error like:
+
+```
+gitlogue: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found (required by gitlogue)
+```
+
+This means your system's glibc version is older than what the pre-built binary requires.
+
+**Solutions:**
+
+1. **Upgrade your OS** (Recommended)
+
+   The safest way is to upgrade to a newer version of your Linux distribution:
+   - Ubuntu 24.04+ includes glibc 2.39
+   - Debian 13 (Trixie)+ includes glibc 2.38+
+   - Fedora 39+ includes glibc 2.38+
+
+2. **Build from source**
+
+   Install via Cargo to compile for your system:
+   ```bash
+   cargo install gitlogue
+   ```
+
+3. **Use Nix**
+
+   If you have Nix installed:
+   ```bash
+   nix run github:unhappychoice/gitlogue
+   ```
 
 ## Next Steps
 
