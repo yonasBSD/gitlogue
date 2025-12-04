@@ -486,9 +486,7 @@ impl AnimationEngine {
                     }
                     // Show "Open File..." dialog and type the file path
                     self.steps.push(AnimationStep::OpenFileDialogStart);
-                    self.steps.push(AnimationStep::Pause {
-                        multiplier: 5.0,
-                    });
+                    self.steps.push(AnimationStep::Pause { multiplier: 5.0 });
 
                     // Type each character of the file path
                     for ch in change.path.chars() {

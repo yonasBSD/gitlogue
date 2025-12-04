@@ -52,6 +52,7 @@ pub struct UI<'a> {
 
 impl<'a> UI<'a> {
     /// Creates a new UI instance with the specified configuration.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         speed_ms: u64,
         repo: Option<&'a GitRepository>,

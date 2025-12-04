@@ -7,8 +7,8 @@ mod theme;
 mod ui;
 mod widgets;
 
-use anyhow::{Context, Result};
 use animation::SpeedRule;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::Config;
 use git::GitRepository;
