@@ -7,6 +7,7 @@ mod theme;
 mod ui;
 mod widgets;
 
+use animation::SpeedRule;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use config::Config;
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 use theme::Theme;
 use ui::UI;
 
+/// Defines the order in which commits are played back during animation.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum PlaybackOrder {
     #[default]
@@ -135,6 +137,14 @@ pub struct Args {
     )]
     pub ignore_file: Option<PathBuf>,
 
+    #[arg(
+        long = "speed-rule",
+        value_name = "PATTERN:MS",
+        action = clap::ArgAction::Append,
+        help = "Set typing speed for files matching pattern (e.g., '*.java:50', '*.xml:5'). Can be specified multiple times."
+    )]
+    pub speed_rule: Vec<String>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -160,6 +170,7 @@ pub enum ThemeCommands {
 }
 
 impl Args {
+    /// Validates the command-line arguments and returns the Git repository path.
     pub fn validate(&self) -> Result<PathBuf> {
         let start_path = self.path.clone().unwrap_or_else(|| PathBuf::from("."));
 
@@ -323,6 +334,19 @@ fn main() -> Result<()> {
         }
     };
 
+    // Parse speed rules: CLI args take priority, then config file
+    let speed_rules: Vec<SpeedRule> = args
+        .speed_rule
+        .iter()
+        .chain(config.speed_rules.iter())
+        .filter_map(|s| {
+            SpeedRule::parse(s).or_else(|| {
+                eprintln!("Warning: Invalid speed rule '{}', skipping", s);
+                None
+            })
+        })
+        .collect();
+
     // Create UI with repository reference
     // Filtered modes (range/author/date) always need repo ref for iteration
     let repo_ref = if is_range_mode || is_filtered {
@@ -340,6 +364,7 @@ fn main() -> Result<()> {
         loop_playback,
         args.commit.clone(),
         is_range_mode,
+        speed_rules,
     );
     ui.load_commit(metadata);
     ui.run()?;

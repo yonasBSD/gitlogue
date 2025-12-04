@@ -1,11 +1,40 @@
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
+use globset::{Glob, GlobMatcher};
 use rand::Rng;
 use unicode_width::UnicodeWidthStr;
 
 use crate::git::{CommitMetadata, DiffHunk, FileChange, FileStatus, LineChangeType};
 use crate::syntax::Highlighter;
+
+/// A rule that specifies typing speed for files matching a glob pattern
+#[derive(Debug, Clone)]
+pub struct SpeedRule {
+    pub matcher: GlobMatcher,
+    pub speed_ms: u64,
+}
+
+impl SpeedRule {
+    /// Parse a speed rule from string format "PATTERN:SPEED_MS"
+    /// Example: "*.java:50" or "src/**/*.rs:30"
+    pub fn parse(s: &str) -> Option<Self> {
+        let parts: Vec<&str> = s.rsplitn(2, ':').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let speed_ms = parts[0].parse::<u64>().ok()?;
+        let pattern_str = parts[1];
+        let glob = Glob::new(pattern_str).ok()?;
+        let matcher = glob.compile_matcher();
+        Some(Self { matcher, speed_ms })
+    }
+
+    /// Check if a file path matches this rule
+    pub fn matches(&self, path: &str) -> bool {
+        self.matcher.is_match(path)
+    }
+}
 
 // Duration multipliers relative to typing speed
 const CURSOR_MOVE_PAUSE: f64 = 0.5; // Cursor movement between lines (base speed)
@@ -52,6 +81,7 @@ pub struct EditorBuffer {
 }
 
 impl EditorBuffer {
+    /// Creates a new empty editor buffer with default values.
     pub fn new() -> Self {
         Self {
             lines: vec![String::new()],
@@ -68,6 +98,7 @@ impl EditorBuffer {
         }
     }
 
+    /// Creates an editor buffer initialized with the given content.
     pub fn from_content(content: &str) -> Self {
         let lines: Vec<String> = if content.is_empty() {
             vec![String::new()]
@@ -90,6 +121,7 @@ impl EditorBuffer {
         }
     }
 
+    /// Inserts a character at the specified line and column position.
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
         if line >= self.lines.len() {
             self.lines.resize(line + 1, String::new());
@@ -106,6 +138,7 @@ impl EditorBuffer {
         line_str.insert(byte_idx, ch);
     }
 
+    /// Inserts a new line with the given content at the specified position.
     pub fn insert_line(&mut self, line: usize, content: String) {
         if line > self.lines.len() {
             self.lines.resize(line, String::new());
@@ -113,6 +146,7 @@ impl EditorBuffer {
         self.lines.insert(line, content);
     }
 
+    /// Deletes the line at the specified position.
     pub fn delete_line(&mut self, line: usize) {
         if line < self.lines.len() {
             self.lines.remove(line);
@@ -143,7 +177,7 @@ pub enum AnimationStep {
         col: usize,
     },
     Pause {
-        duration_ms: u64,
+        multiplier: f64,
     },
     SwitchFile {
         file_index: usize,
@@ -188,6 +222,7 @@ pub struct AnimationEngine {
     current_step: usize,
     last_update: Instant,
     speed_ms: u64,
+    base_speed_ms: u64,
     next_step_delay: u64,
     pause_until: Option<Instant>,
     pub cursor_visible: bool,
@@ -216,9 +251,12 @@ pub struct AnimationEngine {
     current_metadata: Option<CommitMetadata>,
     /// Pending metadata to be applied on ResetState
     pending_metadata: Option<CommitMetadata>,
+    /// Speed rules for different file patterns
+    speed_rules: Vec<SpeedRule>,
 }
 
 impl AnimationEngine {
+    /// Creates a new animation engine with the specified typing speed.
     pub fn new(speed_ms: u64) -> Self {
         let target_fps: u64 = 120;
         let frame_interval_ms = 1000 / target_fps;
@@ -230,6 +268,7 @@ impl AnimationEngine {
             current_step: 0,
             last_update: now,
             speed_ms,
+            base_speed_ms: speed_ms,
             next_step_delay: speed_ms,
             pause_until: None,
             cursor_visible: true,
@@ -249,13 +288,32 @@ impl AnimationEngine {
             dialog_typing_text: String::new(),
             current_metadata: None,
             pending_metadata: None,
+            speed_rules: Vec::new(),
         }
     }
 
+    /// Set speed rules for file-specific typing speeds
+    pub fn set_speed_rules(&mut self, rules: Vec<SpeedRule>) {
+        self.speed_rules = rules;
+    }
+
+    /// Get the speed for a given file path based on speed rules
+    /// Returns the first matching rule's speed, or the base speed if no match
+    fn get_speed_for_file(&self, path: &str) -> u64 {
+        for rule in &self.speed_rules {
+            if rule.matches(path) {
+                return rule.speed_ms;
+            }
+        }
+        self.base_speed_ms
+    }
+
+    /// Sets the viewport height for scroll calculations.
     pub fn set_viewport_height(&mut self, height: usize) {
         self.viewport_height = height;
     }
 
+    /// Sets the content width for line wrapping calculations.
     pub fn set_content_width(&mut self, width: usize) {
         self.content_width = width;
     }
@@ -301,19 +359,19 @@ impl AnimationEngine {
         let datetime_str = metadata.date.format("%Y-%m-%d %H:%M:%S").to_string();
         self.add_terminal_command(&format!("time-travel {}", datetime_str));
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * CHECKOUT_PAUSE) as u64,
+            multiplier: CHECKOUT_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "⚡ Initializing temporal displacement field...".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * CHECKOUT_OUTPUT_PAUSE * 0.5) as u64,
+            multiplier: CHECKOUT_OUTPUT_PAUSE * 0.5,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "✨ Warping through spacetime...".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * CHECKOUT_OUTPUT_PAUSE * 0.5) as u64,
+            multiplier: CHECKOUT_OUTPUT_PAUSE * 0.5,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("🕰️  Arrived at {}", datetime_str),
@@ -326,7 +384,7 @@ impl AnimationEngine {
             ),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * CHECKOUT_OUTPUT_PAUSE) as u64,
+            multiplier: CHECKOUT_OUTPUT_PAUSE,
         });
 
         // Apply new metadata after time-travel animation
@@ -352,7 +410,7 @@ impl AnimationEngine {
                     });
 
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * OPEN_FILE_PAUSE) as u64,
+                        multiplier: OPEN_FILE_PAUSE,
                     });
                     let reason = change
                         .exclusion_reason
@@ -362,7 +420,7 @@ impl AnimationEngine {
                         text: format!("📦 {} (skipped - {})", change.path, reason),
                     });
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * OPEN_CMD_PAUSE) as u64,
+                        multiplier: OPEN_CMD_PAUSE,
                     });
                 }
                 // For deleted files, skip editor animation and only run rm + git add
@@ -377,15 +435,15 @@ impl AnimationEngine {
                     });
 
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_PAUSE) as u64,
+                        multiplier: GIT_ADD_PAUSE,
                     });
                     self.add_terminal_command(&format!("rm {}", change.path));
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64,
+                        multiplier: GIT_ADD_CMD_PAUSE,
                     });
                     self.add_terminal_command(&format!("git add {}", change.path));
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64,
+                        multiplier: GIT_ADD_CMD_PAUSE,
                     });
                 }
                 // For renamed/moved files, skip editor animation and only run mv + git add
@@ -401,17 +459,17 @@ impl AnimationEngine {
                     });
 
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_PAUSE) as u64,
+                        multiplier: GIT_ADD_PAUSE,
                     });
                     if let Some(old_path) = &change.old_path {
                         self.add_terminal_command(&format!("mv {} {}", old_path, change.path));
                         self.steps.push(AnimationStep::Pause {
-                            duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64,
+                            multiplier: GIT_ADD_CMD_PAUSE,
                         });
                     }
                     self.add_terminal_command(&format!("git add {}", change.path));
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64,
+                        multiplier: GIT_ADD_CMD_PAUSE,
                     });
                 }
                 // Normal files (Added, Modified, etc.) - full editor animation
@@ -419,18 +477,16 @@ impl AnimationEngine {
                     // Open file in editor
                     if index == 0 {
                         self.steps.push(AnimationStep::Pause {
-                            duration_ms: (self.speed_ms as f64 * OPEN_FILE_FIRST_PAUSE) as u64,
+                            multiplier: OPEN_FILE_FIRST_PAUSE,
                         });
                     } else {
                         self.steps.push(AnimationStep::Pause {
-                            duration_ms: (self.speed_ms as f64 * OPEN_FILE_PAUSE) as u64,
+                            multiplier: OPEN_FILE_PAUSE,
                         });
                     }
                     // Show "Open File..." dialog and type the file path
                     self.steps.push(AnimationStep::OpenFileDialogStart);
-                    self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * 5.0) as u64,
-                    });
+                    self.steps.push(AnimationStep::Pause { multiplier: 5.0 });
 
                     // Type each character of the file path
                     for ch in change.path.chars() {
@@ -438,7 +494,7 @@ impl AnimationEngine {
                     }
 
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * OPEN_CMD_PAUSE) as u64,
+                        multiplier: OPEN_CMD_PAUSE,
                     });
 
                     // Add file switch step with both old and new content
@@ -453,7 +509,7 @@ impl AnimationEngine {
 
                     // Add pause before starting file animation
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * FILE_SWITCH_PAUSE) as u64,
+                        multiplier: FILE_SWITCH_PAUSE,
                     });
 
                     // Generate animation steps for this file
@@ -461,11 +517,11 @@ impl AnimationEngine {
 
                     // Git add this file after editing
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_PAUSE) as u64,
+                        multiplier: GIT_ADD_PAUSE,
                     });
                     self.add_terminal_command(&format!("git add {}", change.path));
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * GIT_ADD_CMD_PAUSE) as u64,
+                        multiplier: GIT_ADD_CMD_PAUSE,
                     });
                 }
             }
@@ -475,7 +531,7 @@ impl AnimationEngine {
         let commit_message = metadata.message.lines().next().unwrap_or("Update");
         self.add_terminal_command(&format!("git commit -m \"{}\"", commit_message));
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * GIT_COMMIT_PAUSE) as u64,
+            multiplier: GIT_COMMIT_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!("💾 [main {}] {}", &metadata.hash[..7], commit_message),
@@ -488,37 +544,37 @@ impl AnimationEngine {
             ),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * COMMIT_OUTPUT_PAUSE) as u64,
+            multiplier: COMMIT_OUTPUT_PAUSE,
         });
 
         // Git push
         self.add_terminal_command("git push origin main");
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * GIT_PUSH_PAUSE) as u64,
+            multiplier: GIT_PUSH_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "🚀 Launching code into the cloud...".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * PUSH_OUTPUT_PAUSE) as u64,
+            multiplier: PUSH_OUTPUT_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "📦 Compressing digital dreams: 100% (5/5)".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * PUSH_OUTPUT_PAUSE) as u64,
+            multiplier: PUSH_OUTPUT_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "✍️  Signing with invisible ink: done.".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * GIT_PUSH_PAUSE) as u64,
+            multiplier: GIT_PUSH_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: "📡 Beaming to origin/main via satellite...".to_string(),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * PUSH_OUTPUT_PAUSE) as u64,
+            multiplier: PUSH_OUTPUT_PAUSE,
         });
         self.steps.push(AnimationStep::TerminalOutput {
             text: format!(
@@ -528,7 +584,7 @@ impl AnimationEngine {
             ),
         });
         self.steps.push(AnimationStep::Pause {
-            duration_ms: (self.speed_ms as f64 * PUSH_FINAL_PAUSE) as u64,
+            multiplier: PUSH_FINAL_PAUSE,
         });
 
         // Start with empty editor (no file opened yet)
@@ -586,7 +642,7 @@ impl AnimationEngine {
 
             // Add pause between hunks
             self.steps.push(AnimationStep::Pause {
-                duration_ms: (self.speed_ms as f64 * HUNK_PAUSE) as u64,
+                multiplier: HUNK_PAUSE,
             });
         }
     }
@@ -644,8 +700,7 @@ impl AnimationEngine {
         }
 
         // Generate movement steps
-        let base_pause =
-            (self.speed_ms as f64 * CURSOR_MOVE_PAUSE * base_speed_multiplier).max(1.0) as u64;
+        let pause_multiplier = (CURSOR_MOVE_PAUSE * base_speed_multiplier).max(0.01);
 
         for line in positions {
             if line != from_line {
@@ -656,7 +711,7 @@ impl AnimationEngine {
                     .unwrap_or(0);
                 self.steps.push(AnimationStep::MoveCursor { line, col });
                 self.steps.push(AnimationStep::Pause {
-                    duration_ms: base_pause,
+                    multiplier: pause_multiplier,
                 });
             }
         }
@@ -693,7 +748,7 @@ impl AnimationEngine {
                     self.steps
                         .push(AnimationStep::DeleteLine { line: buffer_line });
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * DELETE_LINE_PAUSE) as u64,
+                        multiplier: DELETE_LINE_PAUSE,
                     });
                     cursor_line = buffer_line;
                     // After deletion, buffer_line stays the same
@@ -723,7 +778,7 @@ impl AnimationEngine {
                     buffer_line += 1; // Move to next line after insertion
 
                     self.steps.push(AnimationStep::Pause {
-                        duration_ms: (self.speed_ms as f64 * INSERT_LINE_PAUSE) as u64,
+                        multiplier: INSERT_LINE_PAUSE,
                     });
                 }
                 LineChangeType::Context => {
@@ -740,7 +795,7 @@ impl AnimationEngine {
                             col,
                         });
                         self.steps.push(AnimationStep::Pause {
-                            duration_ms: (self.speed_ms as f64 * CURSOR_MOVE_PAUSE) as u64,
+                            multiplier: CURSOR_MOVE_PAUSE,
                         });
                     }
                     cursor_line = buffer_line;
@@ -752,7 +807,7 @@ impl AnimationEngine {
         (cursor_line, buffer_line)
     }
 
-    /// Update animation state and return true if display needs refresh
+    /// Updates animation state and returns true if display needs refresh.
     pub fn tick(&mut self) -> bool {
         self.update_cursor_blink();
 
@@ -849,6 +904,10 @@ impl AnimationEngine {
                 let variation = rng.random_range(0.7..=1.3);
                 ((self.speed_ms as f64) * 2.0 * variation) as u64
             }
+            AnimationStep::Pause { .. } => {
+                // Pause timing is driven by `pause_until`; don't add extra delay
+                0
+            }
             _ => {
                 // Other steps use base speed
                 self.speed_ms
@@ -892,7 +951,8 @@ impl AnimationEngine {
                 self.buffer.cursor_line = line;
                 self.buffer.cursor_col = col;
             }
-            AnimationStep::Pause { duration_ms } => {
+            AnimationStep::Pause { multiplier } => {
+                let duration_ms = (self.speed_ms as f64 * multiplier) as u64;
                 self.pause_until = Some(Instant::now() + Duration::from_millis(duration_ms));
             }
             AnimationStep::OpenFileDialogStart => {
@@ -916,6 +976,9 @@ impl AnimationEngine {
                 self.current_file_index = file_index;
                 self.current_file_path = Some(path.clone());
                 self.buffer = EditorBuffer::from_content(&old_content);
+
+                // Update typing speed based on file-specific rules
+                self.speed_ms = self.get_speed_for_file(&path);
 
                 // Update syntax highlighter for new file
                 // This will clear language settings if not supported
@@ -1048,6 +1111,7 @@ impl AnimationEngine {
         self.buffer.scroll_offset = logical_offset;
     }
 
+    /// Returns true if the animation has completed.
     pub fn is_finished(&self) -> bool {
         self.state == AnimationState::Finished
     }
